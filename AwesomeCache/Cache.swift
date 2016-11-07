@@ -58,6 +58,12 @@ open class Cache<T: NSCoding> {
             try fileManager.setAttributes(protection, ofItemAtPath: cacheDirectory.path)
         }
     }
+    
+    public convenience init(name: String, countLimit: Int, totalCostLimit: Int) throws {
+        try self.init(name: name, directory: nil)
+        self.cache.countLimit = countLimit
+        self.cache.totalCostLimit = totalCostLimit
+    }
 
     /// Convenience Initializer
     ///
@@ -85,12 +91,12 @@ open class Cache<T: NSCoding> {
     ///                         The supplied success or failure blocks must be called upon completion.
     ///                         If the error block is called, the object is not cached and the completion block is invoked with this error.
     /// - parameter completion: Called as soon as a cached object is available to use. The second parameter is true if the object was already cached.
-    open func setObject(forKey key: String, cacheBlock: (CacheBlockClosure, ErrorClosure) -> Void, completion: @escaping (T?, Bool, NSError?) -> Void) {
+    open func setObject(forKey key: String, cost: Int = 0, cacheBlock: (CacheBlockClosure, ErrorClosure) -> Void, completion: @escaping (T?, Bool, NSError?) -> Void) {
         if let object = object(forKey: key) {
             completion(object, true, nil)
         } else {
             let successBlock: CacheBlockClosure = { (obj, expires) in
-                self.setObject(obj, forKey: key, expires: expires)
+                self.setObject(obj, forKey: key, expires: expires, cost: cost)
                 completion(obj, false, nil)
             }
 
@@ -100,6 +106,10 @@ open class Cache<T: NSCoding> {
 
             cacheBlock(successBlock, failureBlock)
         }
+    }
+    
+    public func setObject(object: T, forKey key: String, expires: CacheExpiry = .never, cost: Int) {
+        setObject(object, forKey: key, expires: expires, cost: cost)
     }
 
 
@@ -154,12 +164,12 @@ open class Cache<T: NSCoding> {
     /// - parameter object:	The object that should be cached
     /// - parameter forKey:	A key that represents this object in the cache
     /// - parameter expires: The CacheExpiry that indicates when the given object should be expired
-    open func setObject(_ object: T, forKey key: String, expires: CacheExpiry = .never) {
+    open func setObject(_ object: T, forKey key: String, expires: CacheExpiry = .never, cost: Int = 0) {
         let expiryDate = expiryDateForCacheExpiry(expires)
         let cacheObject = CacheObject(value: object, expiryDate: expiryDate)
 
         queue.sync(flags: .barrier, execute: {
-            self.add(cacheObject, key: key)
+            self.add(cacheObject, key: key, cost: cost)
         }) 
     }
 
@@ -218,9 +228,9 @@ open class Cache<T: NSCoding> {
 
     // MARK: Private Helper (not thread safe)
 
-    fileprivate func add(_ object: CacheObject, key: String) {
+    fileprivate func add(_ object: CacheObject, key: String, cost: Int) {
         // Set object in local cache
-        cache.setObject(object, forKey: key as NSString)
+        cache.setObject(object, forKey: key as NSString, cost: cost)
 
         // Write object to disk
         let path = urlForKey(key).path
